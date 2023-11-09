@@ -207,7 +207,7 @@ def load_callbacks(args):
     return callbacks
 
 def main():
-    parser = argparse.ArgumentParser(description='CAF')
+    parser = argparse.ArgumentParser(description='SpuGraph')
     parser.add_argument('--dataset_name', type=str, help='dataset name')
     parser.add_argument('--model_name', type=str, help='model name')
     parser.add_argument('--seed', type=int, help='random seed')
