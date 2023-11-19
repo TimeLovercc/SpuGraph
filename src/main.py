@@ -232,7 +232,7 @@ def main():
     trainer.fit(model, datamodule=data_module)
     trainer.test(model, datamodule=data_module)
 
-    if args.model_name == 'caf':
+    if args.model_name in ['caf', 'spu']: # function for two stage models
         model.load_from_checkpoint(trainer.checkpoint_callback.best_model_path)
         trainer.fit(model, datamodule=data_module)
         trainer.test(model, datamodule=data_module)
