@@ -81,18 +81,26 @@ class Train(pl.LightningModule):
             return [optimizer], [scheduler]
 
     def load_model(self):
-        name = self.hparams.model_name
-        upper_name = name.upper()
+        model_name = self.hparams.model_name
+        model_upper_name = model_name.upper()
+        backbone_name = self.hparams.backbone_name
+        backbone_upper_name = backbone_name.upper()
         try:
             sys.path.append('./src/models')
-            Model = getattr(importlib.import_module(name), upper_name)
+            Model = getattr(importlib.import_module(model_name), model_upper_name)
         except:
-            raise ValueError(f'Invalid Module File Name or Invalid Class Name {name}.{upper_name}!')
-        self.model = self.instancialize(Model)
+            raise ValueError(f'Invalid Module File Name or Invalid Class Name {model_name}.{model_upper_name}!')
+        try:
+            sys.path.append('./src/backbones')
+            Backbone = getattr(importlib.import_module(backbone_name), backbone_upper_name)
+        except:
+            raise ValueError(f'Invalid Backbone File Name or Invalid Class Name {backbone_name}.{backbone_upper_name}!')
+        self.model = self.instancialize(Model, False)
+        self.model.backbone = self.instancialize(Backbone, True)
 
-    def instancialize(self, Model, **other_args):
+    def instancialize(self, Model, is_backbone, **other_args):
         class_args = inspect.getfullargspec(Model.__init__).args[1:]
-        inkeys = self.hparams.model_config.keys()
+        inkeys = self.hparams.model_config.keys() if not is_backbone else self.hparams.backbone_config.keys()
         args1 = {}
         for arg in class_args:
             if arg in inkeys:
@@ -102,32 +110,26 @@ class Train(pl.LightningModule):
     
     def metrics(self, out, batch, mode):
         preds = out
-        labels, sens, mask = batch['y'], batch['sens'], batch[f'{mode}_mask']
+        labels, groups, mask = batch['y'], batch['groups'], batch[f'{mode}_mask']
+        unique_groups = torch.unique(groups[mask])
+
+        worst_group_acc = float('inf')  # Initialize worst group accuracy
+        for group in unique_groups:
+            group_mask = (groups == group) & mask
+            if self.hparams.model_config['out_dim'] == 1:
+                group_acc = binary_accuracy(preds[group_mask], labels[group_mask])
+            elif self.hparams.model_config['out_dim'] > 2:
+                group_acc = multiclass_accuracy(preds[group_mask], labels[group_mask], num_classes=self.hparams.out_dim, average='micro')
+            
+            worst_group_acc = min(worst_group_acc, group_acc)  # Update worst group accuracy
+
         if self.hparams.model_config['out_dim'] == 1:
             acc = binary_accuracy(preds[mask], labels[mask])
-            f1 = binary_f1_score(preds[mask], labels[mask])
-            auroc = binary_auroc(preds[mask], labels[mask])
         elif self.hparams.model_config['out_dim'] > 2:
             acc = multiclass_accuracy(preds[mask], labels[mask], num_classes=self.hparams.out_dim, average='micro')
-            f1 = multiclass_f1_score(preds[mask], labels[mask], num_classes=self.hparams.out_dim, average='micro')
-            auroc = multiclass_auroc(preds[mask], labels[mask], num_classes=self.hparams.out_dim, average='macro')
-        parity, equality = self.binary_fair_metrics(preds[mask], labels[mask], sens[mask])
-        fair = acc + f1 + auroc - self.hparams.alpha * (parity + equality)
-        return {f'{mode}_acc': acc, f'{mode}_f1': f1, f'{mode}_auroc': auroc, f'{mode}_parity': parity, \
-                f'{mode}_equality': equality, f'{mode}_fair': fair}
-    
-    def binary_fair_metrics(self, preds, labels, sens):
-        idx_s0 = sens==0
-        idx_s1 = sens==1
-        idx_s0 = idx_s0.detach().cpu().numpy()
-        idx_s1 = idx_s1.detach().cpu().numpy()
-        labels = labels.detach().cpu().numpy()
-        idx_s0_y1 = np.bitwise_and(idx_s0, labels==1)
-        idx_s1_y1 = np.bitwise_and(idx_s1, labels==1)
-        preds = (preds.squeeze()>0.5)
-        parity = abs(sum(preds[idx_s0])/sum(idx_s0)-sum(preds[idx_s1])/sum(idx_s1))
-        equality = abs(sum(preds[idx_s0_y1])/sum(idx_s0_y1)-sum(preds[idx_s1_y1])/sum(idx_s1_y1))
-        return parity.item(), equality.item()
+        
+        metrics_dict = {f'{mode}_acc': acc, f'{mode}_worst_group_acc': worst_group_acc}
+        return metrics_dict
 
 class DInterface(pl.LightningDataModule):
     def __init__(self, **kwargs):
@@ -137,19 +139,19 @@ class DInterface(pl.LightningDataModule):
         
     def setup(self, stage):
         if stage == 'fit' or stage is None:
-            self.trainset = self.dataset
-            self.valset = self.dataset
+            self.trainset = self.instancialize(self.dataset_class, split='train')
+            self.valset = self.instancialize(self.dataset_class, split='val')
         if stage == 'test' or stage is None:
-            self.testset = self.dataset
+            self.testset = self.instancialize(self.dataset_class, split='test')
 
     def train_dataloader(self):
-        return DataLoader(self.trainset, batch_size=1, shuffle=False)
+        return DataLoader(self.trainset, batch_size=self.hparams.data_config['batch_size'], shuffle=True)
     
     def val_dataloader(self):
-        return DataLoader(self.valset, batch_size=1, shuffle=False)
+        return DataLoader(self.valset, batch_size=self.hparams.data_config['batch_size'], shuffle=False)
     
     def test_dataloader(self):
-        return DataLoader(self.testset, batch_size=1, shuffle=False)
+        return DataLoader(self.testset, batch_size=self.hparams.data_config['batch_size'], shuffle=False)
     
     def load_data_module(self):
         name = self.hparams.dataset_name
@@ -159,7 +161,8 @@ class DInterface(pl.LightningDataModule):
             Dataset = getattr(importlib.import_module(name), camel_name)
         except:
             raise ValueError(f'Invalid Dataset File Name or Invalid Class Name {name}.{camel_name}')
-        self.dataset = self.instancialize(Dataset)
+        self.dataset_class = Dataset
+        self.dataset = self.instancialize(Dataset, split='train')
         
     def instancialize(self, Dataset, **other_args):
         class_args = inspect.getfullargspec(Dataset.__init__).args[1:]
@@ -209,12 +212,13 @@ def load_callbacks(args):
 def main():
     parser = argparse.ArgumentParser(description='SpuGraph')
     parser.add_argument('--dataset_name', type=str, help='dataset name')
+    parser.add_argument('--backbone_name', type=str, help='backbone config')
     parser.add_argument('--model_name', type=str, help='model name')
     parser.add_argument('--seed', type=int, help='random seed')
     args = parser.parse_args()
     config_dir = Path('./src/configs')
     global_config = yaml.safe_load((config_dir / 'global_config.yml').open('r'))
-    local_config = yaml.safe_load((config_dir / f'{args.dataset_name}_{args.model_name}.yml').open('r'))
+    local_config = yaml.safe_load((config_dir / f'{args.dataset_name}_{args.backbone_name}_{args.model_name}.yml').open('r'))
     args = argparse.Namespace(**{**global_config, **local_config, **vars(args)})
     
     pl.seed_everything(args.seed)
@@ -225,7 +229,7 @@ def main():
 
     model = Train(**vars(args))
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    csv_logger = CSVLogger(save_dir=Path(args.log_dir) / f'{args.dataset_name}_{args.model_name}', version=timestamp)
+    csv_logger = CSVLogger(save_dir=Path(args.log_dir) / f'{args.dataset_name}_{args.backbone_name}_{args.model_name}', version=timestamp)
     callbacks = load_callbacks(args)
     trainer = Trainer(max_epochs=args.epochs, accelerator='gpu',\
                           logger=csv_logger, log_every_n_steps=1, callbacks=callbacks)

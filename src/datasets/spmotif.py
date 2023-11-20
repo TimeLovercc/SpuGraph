@@ -9,24 +9,23 @@ import numpy as np
 from pathlib import Path
 from torch_geometric.data import InMemoryDataset, Data
 
-from .spmotif_utils import gen_dataset
+from spmotif_utils import gen_dataset
 
-
-class SPMotif(InMemoryDataset):
+class Spmotif(InMemoryDataset):
     splits = ['train', 'val', 'test']
 
-    def __init__(self, root, b, mode, fg_only, generate, transform=None, pre_transform=None, pre_filter=None):
-        assert mode in self.splits
+    def __init__(self, root, b, split, fg_only, generate, transform=None, pre_transform=None, pre_filter=None):
+        assert split in self.splits
         self.b = b
-        self.mode = mode
+        self.mode = split
         self.generate = generate
 
         super().__init__(root, transform, pre_transform, pre_filter)
         
         if self.fg_only:
-            idx = self.processed_file_names.index('SPMotif_{}_fg.pt'.format(mode))
+            idx = self.processed_file_names.index('SPMotif_{}_fg.pt'.format(split))
         else:
-            idx = self.processed_file_names.index('SPMotif_{}.pt'.format(mode))
+            idx = self.processed_file_names.index('SPMotif_{}.pt'.format(split))
         self.data, self.slices = torch.load(self.processed_paths[idx])
 
     @property
