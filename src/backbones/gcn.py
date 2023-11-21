@@ -4,10 +4,15 @@ from torch.nn import functional as F
 from torch_geometric.nn import GCNConv, global_mean_pool
 
 class GCN(nn.Module):
-    def __init__(self, in_dim, hidden_dim, out_dim, dropout, gc_layer, bn):
+    def __init__(self, backbone_config):
         super().__init__()
-        self.gc_layer = gc_layer
-        self.p = dropout
+        self.gc_layer = gc_layer = backbone_config['gc_layer']
+        self.in_dim = in_dim = backbone_config['in_dim']
+        self.hidden_dim = hidden_dim = backbone_config['hidden_dim']
+        self.out_dim = out_dim = backbone_config['out_dim']
+        self.p = dropout = backbone_config['dropout']
+        self.bn = bn = backbone_config['bn']
+        
         self.convs = nn.ModuleList([GCNConv(in_dim if i == 0 else hidden_dim, hidden_dim) for i in range(gc_layer)])
         self.bns = nn.ModuleList([nn.BatchNorm1d(hidden_dim) for _ in range(gc_layer - 1)]) if bn else None
         self.fc = nn.Linear(hidden_dim, out_dim)
