@@ -33,7 +33,6 @@ class Train(pl.LightningModule):
         self.load_model()
 
     def training_step(self, batch, batch_idx):
-        batch = batch[0]
         out = self.model(batch)
         loss = self.model.loss(out, batch, mode='train')
         metrics = self.metrics(out, batch, mode='train')
@@ -42,7 +41,6 @@ class Train(pl.LightningModule):
         return loss
     
     def validation_step(self, batch, batch_idx):
-        batch = batch[0]
         out = self.model(batch)
         loss = self.model.loss(out, batch, mode='val')
         metrics = self.metrics(out, batch, mode='val')
@@ -51,7 +49,6 @@ class Train(pl.LightningModule):
         return loss
     
     def test_step(self, batch, batch_idx):
-        batch = batch[0]
         out = self.model(batch)
         loss = self.model.loss(out, batch, mode='test')
         metrics = self.metrics(out, batch, mode='test')
@@ -95,18 +92,18 @@ class Train(pl.LightningModule):
             Backbone = getattr(importlib.import_module(backbone_name), backbone_upper_name)
         except:
             raise ValueError(f'Invalid Backbone File Name or Invalid Class Name {backbone_name}.{backbone_upper_name}!')
-        self.model = self.instancialize(Model, False)
-        self.model.backbone = self.instancialize(Backbone, True)
+        self.model = Model(self.hparams.model_config)
+        self.model.backbone = Backbone(self.hparams.backbone_config)
 
-    def instancialize(self, Model, is_backbone, **other_args):
-        class_args = inspect.getfullargspec(Model.__init__).args[1:]
-        inkeys = self.hparams.model_config.keys() if not is_backbone else self.hparams.backbone_config.keys()
-        args1 = {}
-        for arg in class_args:
-            if arg in inkeys:
-                args1[arg] = self.hparams.model_config[arg]
-        args1.update(other_args)
-        return Model(**args1)
+    # def instancialize(self, Model, is_backbone, **other_args):
+    #     class_args = inspect.getfullargspec(Model.__init__).args[1:]
+    #     inkeys = self.hparams.model_config.keys() if not is_backbone else self.hparams.backbone_config.keys()
+    #     args1 = {}
+    #     for arg in class_args:
+    #         if arg in inkeys:
+    #             args1[arg] = self.hparams.model_config[arg] if not is_backbone else self.hparams.backbone_config[arg]
+    #     args1.update(other_args)
+    #     return Model(**args1)
     
     def metrics(self, out, batch, mode):
         preds = out
@@ -139,10 +136,10 @@ class DInterface(pl.LightningDataModule):
         
     def setup(self, stage):
         if stage == 'fit' or stage is None:
-            self.trainset = self.instancialize(self.dataset_class, split='train')
-            self.valset = self.instancialize(self.dataset_class, split='val')
+            self.trainset = self.instancialize(self.dataset_class, 'train', self.hparams.data_config)
+            self.valset = self.instancialize(self.dataset_class, 'val', self.hparams.data_config)
         if stage == 'test' or stage is None:
-            self.testset = self.instancialize(self.dataset_class, split='test')
+            self.testset = self.instancialize(self.dataset_class, 'test', self.hparams.data_config)
 
     def train_dataloader(self):
         return DataLoader(self.trainset, batch_size=self.hparams.data_config['batch_size'], shuffle=True)
@@ -162,19 +159,12 @@ class DInterface(pl.LightningDataModule):
         except:
             raise ValueError(f'Invalid Dataset File Name or Invalid Class Name {name}.{camel_name}')
         self.dataset_class = Dataset
-        self.dataset = self.instancialize(Dataset, split='train')
+        self.dataset = self.instancialize(Dataset, 'train', self.hparams.data_config)
         
-    def instancialize(self, Dataset, **other_args):
-        class_args = inspect.getfullargspec(Dataset.__init__).args[1:]
-        inkeys = self.hparams.data_config.keys()
-        args1 = {}
-        for arg in class_args:
-            if arg in inkeys:
-                args1[arg] = self.hparams.data_config[arg]
-        args1.update(other_args)
-        if args1['transform'] == 'normalize':
-            args1['transform'] = T.NormalizeFeatures()
-        return Dataset(**args1)
+    def instancialize(self, Dataset, split, data_config):
+        if data_config['transform'] == 'normalize':
+            data_config['transform'] = T.NormalizeFeatures()
+        return Dataset(split, data_config)
     
     def get_in_out_dim(self):
         feat_dim = self.dataset.num_features
@@ -224,8 +214,8 @@ def main():
     pl.seed_everything(args.seed)
     data_module = DInterface(**vars(args))
     feat_dim, class_num = data_module.get_in_out_dim()
-    args.model_config['in_dim'] = feat_dim
-    args.model_config['out_dim'] = class_num if class_num > 2 else 1
+    args.backbone_config['in_dim'] = feat_dim
+    args.backbone_config['out_dim'] = class_num if class_num > 2 else 1
 
     model = Train(**vars(args))
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")

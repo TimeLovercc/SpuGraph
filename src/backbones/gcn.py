@@ -1,8 +1,7 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
-from torch_geometric.nn import GCNConv
-
+from torch_geometric.nn import GCNConv, global_mean_pool
 
 class GCN(nn.Module):
     def __init__(self, in_dim, hidden_dim, out_dim, dropout, gc_layer, bn):
@@ -22,7 +21,7 @@ class GCN(nn.Module):
                     m.bias.data.zero_()
 
     def forward(self, batch):
-        x, edge_index = batch['x'], batch['edge_index']
+        x, edge_index, batch_idx = batch['x'], batch['edge_index'], batch['batch']
         x = F.dropout(x, p=self.p, training=self.training)
         for layer in range(self.gc_layer-1):
             x = self.convs[layer](x, edge_index)
@@ -33,15 +32,17 @@ class GCN(nn.Module):
         x = F.relu(self.convs[-1](x, edge_index))
         if self.bns is not None:
             x = self.bns[-1](x)
+        
+        # Global mean pooling
+        x = global_mean_pool(x, batch_idx)
+
         x = self.fc(x)
         return x.squeeze()
     
     def loss(self, out, batch, mode):
         preds = out
-        labels, mask = batch['y'], batch[f'{mode}_mask']
+        labels = batch['y']
         if preds.dim() == 1:
-            return F.binary_cross_entropy_with_logits(preds[mask], labels[mask].float())
+            return F.binary_cross_entropy_with_logits(preds, labels.float())
         elif preds.dim() == 2:
-            return F.cross_entropy(preds[mask], labels[mask])
-
-    
+            return F.cross_entropy(preds, labels)

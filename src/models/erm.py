@@ -5,7 +5,7 @@ from torch_geometric.nn import GCNConv
 
 
 class ERM(nn.Module):
-    def __init__(self, pipeline_config):
+    def __init__(self):
         super().__init__()
         self.model = None
 

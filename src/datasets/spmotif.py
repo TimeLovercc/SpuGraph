@@ -5,25 +5,30 @@ import gdown
 import torch
 import numpy as np
 import torch.nn.functional as F
+from torch.utils.data.dataset import ConcatDataset, Dataset
 from torch_geometric.data import InMemoryDataset, Data, extract_zip
 
 from spmotif_utils import gen_dataset
 
 class Spmotif(InMemoryDataset):
 
-    def __init__(self, root, b, split, fg_only, generate, transform=None, pre_transform=None, pre_filter=None):
-        assert split in ['train', 'val', 'test']
-        root = root + f'_{b}'
-        self.b = b
+    # def __init__(self, root, b, split, fg_only, generate, transform=None, pre_transform=None, pre_filter=None):
+    def __init__(self, split, data_config):
         self.split = split
-        self.fg_only = fg_only
-        self.generate = generate
+        self.b = data_config['b']
+        root = data_config['root'] + f'_{self.b}'
+        self.fg_only = data_config['fg_only']
+        self.generate = data_config['generate']
+        self.transform = data_config.get('transform', None)
+        self.pre_transform = data_config.get('pre_transform', None)
+        self.pre_filter = data_config.get('pre_filter', None)
+        assert split in ['train', 'val', 'test']
 
-        super().__init__(root, transform, pre_transform, pre_filter)
+        super().__init__(root, self.transform, self.pre_transform, self.pre_filter)
         if self.fg_only:
-            idx = self.processed_file_names.index('SPMotif_{}_fg.pt'.format(split))
+            idx = self.processed_file_names.index('SPMotif_{}_fg.pt'.format(self.split))
         else:
-            idx = self.processed_file_names.index('SPMotif_{}.pt'.format(split))
+            idx = self.processed_file_names.index('SPMotif_{}.pt'.format(self.split))
         self.data, self.slices = torch.load(self.processed_paths[idx])
 
     @property
