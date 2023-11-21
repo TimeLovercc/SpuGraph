@@ -1,9 +1,10 @@
-# From Discovering Invariant Rationales for Graph Neural Networks
+# From "Discovering Invariant Rationales for Graph Neural Networks" and we made some modification
 
 from .BA3_loc import *
 from pathlib import Path
 import random
 from tqdm import tqdm
+import pickle
 
 
 def gen_dataset(global_b, data_path):
@@ -46,6 +47,7 @@ def gen_dataset(global_b, data_path):
     # Training Dataset
     edge_index_list = []
     label_list = []
+    env_list = []
     ground_truth_list = []
     role_id_list = []
     pos_list = []
@@ -75,6 +77,7 @@ def gen_dataset(global_b, data_path):
         n_mean.append(len(G.nodes))
         edge_index_list.append(edge_index)
         label_list.append(0)
+        env_list.append(base_num)
         ground_truth = find_gd(edge_index, role_id)
         ground_truth_list.append(ground_truth)
         role_id_list.append(role_id)
@@ -107,6 +110,7 @@ def gen_dataset(global_b, data_path):
         n_mean.append(len(G.nodes))
         edge_index_list.append(edge_index)
         label_list.append(1)
+        env_list.append(base_num)
         ground_truth = find_gd(edge_index, role_id)
         ground_truth_list.append(ground_truth)
         role_id_list.append(role_id)
@@ -139,6 +143,7 @@ def gen_dataset(global_b, data_path):
         n_mean.append(len(G.nodes))
         edge_index_list.append(edge_index)
         label_list.append(2)
+        env_list.append(base_num)
         ground_truth = find_gd(edge_index, role_id)
         ground_truth_list.append(ground_truth)
         role_id_list.append(role_id)
@@ -146,8 +151,8 @@ def gen_dataset(global_b, data_path):
         pos_list.append(pos)
     print(np.mean(n_mean), np.mean(e_mean))
     print(len(ground_truth_list))
-
-    np.save(data_path / 'train.npy', (edge_index_list, label_list, ground_truth_list, role_id_list, pos_list))
+    
+    np.save(data_path / 'train.npy', (edge_index_list, label_list, env_list, ground_truth_list, role_id_list, pos_list))
 
     def reindex_edges_and_data(FG_edge_index, ground_truth, role_id, pos):
         # Determine unique nodes in the FG_edge_index
@@ -182,12 +187,13 @@ def gen_dataset(global_b, data_path):
         FG_role_id_list.append(reindexed_role_id)
         FG_pos_list.append(reindexed_pos)
     print(len(FG_edge_index_list_updated))
-    np.save(data_path / 'train_fg.npy', (FG_edge_index_list_updated, label_list, FG_ground_truth_list, FG_role_id_list, FG_pos_list))
+    np.save(data_path / 'train_fg.npy', (FG_edge_index_list_updated, label_list, env_list, FG_ground_truth_list, FG_role_id_list, FG_pos_list))
 
 
     # Validation Dataset
     edge_index_list = []
     label_list = []
+    env_list = []
     ground_truth_list = []
     role_id_list = []
     pos_list = []
@@ -217,6 +223,7 @@ def gen_dataset(global_b, data_path):
         n_mean.append(len(G.nodes))
         edge_index_list.append(edge_index)
         label_list.append(0)
+        env_list.append(base_num)
         ground_truth = find_gd(edge_index, role_id)
         ground_truth_list.append(ground_truth)
         role_id_list.append(role_id)
@@ -249,6 +256,7 @@ def gen_dataset(global_b, data_path):
         n_mean.append(len(G.nodes))
         edge_index_list.append(edge_index)
         label_list.append(1)
+        env_list.append(base_num)
         ground_truth = find_gd(edge_index, role_id)
         ground_truth_list.append(ground_truth)
         role_id_list.append(role_id)
@@ -281,6 +289,7 @@ def gen_dataset(global_b, data_path):
         n_mean.append(len(G.nodes))
         edge_index_list.append(edge_index)
         label_list.append(2)
+        env_list.append(base_num)
         ground_truth = find_gd(edge_index, role_id)
         ground_truth_list.append(ground_truth)
         role_id_list.append(role_id)
@@ -288,7 +297,7 @@ def gen_dataset(global_b, data_path):
         pos_list.append(pos)
     print(np.mean(n_mean), np.mean(e_mean))
     print(len(ground_truth_list))
-    np.save(data_path / 'val.npy', (edge_index_list, label_list, ground_truth_list, role_id_list, pos_list))
+    np.save(data_path / 'val.npy', (edge_index_list, label_list, env_list, ground_truth_list, role_id_list, pos_list))
 
     FG_edge_index_list_updated = []
     FG_ground_truth_list = []
@@ -306,13 +315,15 @@ def gen_dataset(global_b, data_path):
         FG_role_id_list.append(reindexed_role_id)
         FG_pos_list.append(reindexed_pos)
     print(len(FG_edge_index_list_updated))
-    np.save(data_path / 'val_fg.npy', (FG_edge_index_list_updated, label_list, FG_ground_truth_list, FG_role_id_list, FG_pos_list))
+
+    np.save(data_path / 'val_fg.npy', (FG_edge_index_list_updated, label_list, env_list, FG_ground_truth_list, FG_role_id_list, FG_pos_list))
 
 
     # Test Dataset
 
     edge_index_list = []
     label_list = []
+    env_list = []
     ground_truth_list = []
     role_id_list = []
     pos_list = []
@@ -341,6 +352,7 @@ def gen_dataset(global_b, data_path):
         n_mean.append(len(G.nodes))
         edge_index_list.append(edge_index)
         label_list.append(0)
+        env_list.append(base_num)
         ground_truth = find_gd(edge_index, role_id)
         ground_truth_list.append(ground_truth)
         role_id_list.append(role_id)
@@ -373,6 +385,7 @@ def gen_dataset(global_b, data_path):
         n_mean.append(len(G.nodes))
         edge_index_list.append(edge_index)
         label_list.append(1)
+        env_list.append(base_num)
         ground_truth = find_gd(edge_index, role_id)
         ground_truth_list.append(ground_truth)
         role_id_list.append(role_id)
@@ -405,6 +418,7 @@ def gen_dataset(global_b, data_path):
         n_mean.append(len(G.nodes))
         edge_index_list.append(edge_index)
         label_list.append(2)
+        env_list.append(base_num)
         ground_truth = find_gd(edge_index, role_id)
         ground_truth_list.append(ground_truth)
         role_id_list.append(role_id)
@@ -412,7 +426,7 @@ def gen_dataset(global_b, data_path):
         pos_list.append(pos)
     print(np.mean(n_mean), np.mean(e_mean))
     print(len(ground_truth_list))
-    np.save(data_path / 'test.npy', (edge_index_list, label_list, ground_truth_list, role_id_list, pos_list))
+    np.save(data_path / 'test.npy', (edge_index_list, label_list, env_list, ground_truth_list, role_id_list, pos_list))
 
     FG_edge_index_list_updated = []
     FG_ground_truth_list = []
@@ -430,7 +444,7 @@ def gen_dataset(global_b, data_path):
         FG_role_id_list.append(reindexed_role_id)
         FG_pos_list.append(reindexed_pos)
     print(len(FG_edge_index_list_updated))
-    np.save(data_path / 'test_fg.npy', (FG_edge_index_list_updated, label_list, FG_ground_truth_list, FG_role_id_list, FG_pos_list))
+    np.save(data_path / 'test_fg.npy', (FG_edge_index_list_updated, label_list, env_list, FG_ground_truth_list, FG_role_id_list, FG_pos_list))
 
 
 def get_house(basis_type, nb_shapes=80, width_basis=8, feature_generator=None, m=3, draw=True):

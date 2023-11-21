@@ -1,6 +1,9 @@
 data_config:
   root: ./data/spmotif
   transform: null
+  b: 0.9
+  fg_only: false
+  generate: false
 
 backbone_config:
   hidden_dim: 32

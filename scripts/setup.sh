@@ -26,4 +26,5 @@ echo "Setup completed. PyTorch environment is ready!"
 pip install torch_geometric==2.3.1
 pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.0.0+cu118.html
 pip install pytorch_lightning==2.0.4
+pip install numpy==1.21.2
 pip install wandb
