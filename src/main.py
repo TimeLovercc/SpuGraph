@@ -107,23 +107,23 @@ class Train(pl.LightningModule):
     
     def metrics(self, out, batch, mode):
         preds = out
-        labels, groups, mask = batch['y'], batch['groups'], batch[f'{mode}_mask']
-        unique_groups = torch.unique(groups[mask])
+        labels, groups = batch['y'], batch['env']
+        unique_groups = torch.unique(groups)
 
         worst_group_acc = float('inf')  # Initialize worst group accuracy
         for group in unique_groups:
-            group_mask = (groups == group) & mask
-            if self.hparams.model_config['out_dim'] == 1:
+            group_mask = (groups == group) 
+            if self.hparams.backbone_config['out_dim'] == 1:
                 group_acc = binary_accuracy(preds[group_mask], labels[group_mask])
-            elif self.hparams.model_config['out_dim'] > 2:
-                group_acc = multiclass_accuracy(preds[group_mask], labels[group_mask], num_classes=self.hparams.out_dim, average='micro')
+            elif self.hparams.backbone_config['out_dim'] > 2:
+                group_acc = multiclass_accuracy(preds[group_mask], labels[group_mask], num_classes=self.hparams.backbone_config['out_dim'], average='micro')
             
             worst_group_acc = min(worst_group_acc, group_acc)  # Update worst group accuracy
 
-        if self.hparams.model_config['out_dim'] == 1:
-            acc = binary_accuracy(preds[mask], labels[mask])
-        elif self.hparams.model_config['out_dim'] > 2:
-            acc = multiclass_accuracy(preds[mask], labels[mask], num_classes=self.hparams.out_dim, average='micro')
+        if self.hparams.backbone_config['out_dim'] == 1:
+            acc = binary_accuracy(preds, labels)
+        elif self.hparams.backbone_config['out_dim'] > 2:
+            acc = multiclass_accuracy(preds, labels, num_classes=self.hparams.backbone_config['out_dim'], average='micro')
         
         metrics_dict = {f'{mode}_acc': acc, f'{mode}_worst_group_acc': worst_group_acc}
         return metrics_dict
@@ -142,13 +142,13 @@ class DInterface(pl.LightningDataModule):
             self.testset = self.instancialize(self.dataset_class, 'test', self.hparams.data_config)
 
     def train_dataloader(self):
-        return DataLoader(self.trainset, batch_size=self.hparams.data_config['batch_size'], shuffle=True)
+        return DataLoader(self.trainset, batch_size=self.hparams.data_config['batch_size'], num_workers=8, shuffle=True)
     
     def val_dataloader(self):
-        return DataLoader(self.valset, batch_size=self.hparams.data_config['batch_size'], shuffle=False)
+        return DataLoader(self.valset, batch_size=self.hparams.data_config['batch_size'], num_workers=8, shuffle=False)
     
     def test_dataloader(self):
-        return DataLoader(self.testset, batch_size=self.hparams.data_config['batch_size'], shuffle=False)
+        return DataLoader(self.testset, batch_size=self.hparams.data_config['batch_size'], num_workers=8, shuffle=False)
     
     def load_data_module(self):
         name = self.hparams.dataset_name
