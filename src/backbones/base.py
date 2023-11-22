@@ -1,7 +1,8 @@
 import torch
-from torch import Tensor, nn
+from torch import nn
 from torch.nn import functional as F
-from torch_geometric.nn import GCNConv, global_mean_pool, LEConv
+from torch_geometric.nn import global_mean_pool, global_add_pool, global_max_pool, GlobalAttention, Set2Set
+from ogb.graphproppred.mol_encoder import AtomEncoder, BondEncoder
 
 class BASE(nn.Module):
     def __init__(self, backbone_config):
@@ -9,19 +10,43 @@ class BASE(nn.Module):
         self.gc_layer = gc_layer = backbone_config['gc_layer']
         self.gc_type = gc_type = backbone_config['gc_type']
         self.in_dim = in_dim = backbone_config['in_dim']
+        self.edge_attr_dim = edge_attr_dim = backbone_config['edge_attr_dim']
         self.hidden_dim = hidden_dim = backbone_config['hidden_dim']
         self.out_dim = out_dim = backbone_config['out_dim']
         self.p = dropout = backbone_config['dropout']
         self.bn = bn = backbone_config['bn']
+        self.use_edge_attr = use_edge_attr = backbone_config['use_edge_attr']
+        self.pooling = pooling = backbone_config['pooling']
         
-        self.node_encoder = nn.Linear(in_dim, hidden_dim)
-        self.edge_encoder = nn.Linear(in_dim, hidden_dim)
-        self.convs = nn.ModuleList([LEConv(hidden_dim, hidden_dim) for i in range(gc_layer)])
-        self.relus = nn.ModuleList([nn.ReLU() for i in range(gc_layer)])
-
-        self.pool = global_mean_pool
+        # node encoder and egde encoder
+        if self.in_dim == 1:
+            self.node_encoder = AtomEncoder(self.hidden_dim)
+            if use_edge_attr and self.edge_attr_dim != 0:
+                self.edge_encoder = BondEncoder(self.hidden_dim)
+        elif self.in_dim == -1:
+            self.node_encoder = nn.Embedding(1, self.hidden_dim)
+            if use_edge_attr and self.edge_attr_dim != 0:
+                self.edge_encoder = nn.Linear(edge_attr_dim, self.hidden_dim)
+        else:
+            self.node_encoder = nn.Linear(self.in_dim, self.hidden_dim)
+            if use_edge_attr and self.edge_attr_dim != 0:
+                self.edge_encoder = nn.Linear(edge_attr_dim, self.hidden_dim)
         
-        self.weights_init()
+        # graph poolings
+        if self.pooling == "sum":
+            self.pool = global_add_pool
+        elif self.pooling == "mean":
+            self.pool = global_mean_pool
+        elif self.pooling == "max":
+            self.pool = global_max_pool
+        elif self.pooling == "attention":
+            self.pool = GlobalAttention(gate_nn=torch.nn.Sequential(torch.nn.Linear(hidden_dim, 2 * hidden_dim), torch.nn.BatchNorm1d(2 * \
+                                                            hidden_dim), torch.nn.ReLU(), torch.nn.Linear(2 * hidden_dim, 1)))
+        elif self.pooling == "set2set":
+            self.pool = Set2Set(hidden_dim, processing_steps=2)
+        else:
+            raise ValueError("Invalid graph pooling type.")
+        
 
     def weights_init(self):
         for m in self.modules():
@@ -41,8 +66,9 @@ class BASE(nn.Module):
         return edge_encode
     
     def get_node_emb(self, x_encode, batch, edge_att=None):
+        edge_weight = batch['edge_attr']
         for conv, relu in zip(self.convs, self.relus):
-            x_encode = conv(x_encode, batch['edge_index'], edge_weight=edge_att)
+            x_encode = conv(x_encode, batch['edge_index'], edge_weight=edge_weight, edge_atten=edge_att)
             x_encode = relu(x_encode)
             x_encode = F.dropout(x_encode, p=self.p, training=self.training)
         node_emb = x_encode

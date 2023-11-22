@@ -69,6 +69,9 @@ The `models` directory contains implementations of different graph neural networ
 1. CIGA has many different backbones, where should we put them? Maybe backbones.
 2. CIGA and DIR have some same name methods, should we put them in a same file?
 3. Should we add a function to select representation or raw? Maybe not.
+4. What if we have too many redundant codes? Use base class to reduce the redundant codes.
+5. For node encoder, three cases, 1, -1, >1.
+6. For a new backbone, first define new layer type (add edge_att in conv), then use the base class to implement the new backbone.
 
 ## Contributing
 Contributions to the SpuGraph project are welcome. Please follow the standard procedures for contributing to a GitHub project:
