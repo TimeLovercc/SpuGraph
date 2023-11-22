@@ -29,22 +29,7 @@ class SPNET(nn.Module):
             self.relus.append(ReLU())
 
         self.pool = global_mean_pool
-
-        self.fc = nn.Sequential(
-            Linear(hidden_dim, 2*hidden_dim),
-            ReLU(),
-            Linear(2*hidden_dim, out_dim)
-        )
-        self.conf_mlp = nn.Sequential(
-            Linear(hidden_dim, 2*hidden_dim),
-            ReLU(),
-            Linear(2*hidden_dim, 3)
-        )
-        self.cq = Linear(3, 3)
-        self.conf_fw = nn.Sequential(
-            self.conf_mlp,
-            self.cq
-        )
+        
 
     def forward(self, batch, edge_att=None):
         batch_idx = batch['batch']
@@ -68,19 +53,6 @@ class SPNET(nn.Module):
         node_x = self.get_emb(batch, edge_att=edge_att)
         graph_x = self.pool(node_x, batch_idx)
         return graph_x
-
-    def get_causal_pred(self, causal_graph_x):
-        pred = self.fc(causal_graph_x)
-        return pred
-
-    def get_conf_pred(self, conf_graph_x):
-        pred = self.conf_fw(conf_graph_x)
-        return pred
-
-    def get_comb_pred(self, causal_graph_x, conf_graph_x):
-        causal_pred = self.fc(causal_graph_x)
-        conf_pred = self.conf_mlp(conf_graph_x).detach()
-        return torch.sigmoid(conf_pred) * causal_pred
 
     def reset_parameters(self):
         with torch.no_grad():

@@ -15,8 +15,11 @@ backbone_config:
 
 model_config:
   causal_ratio: 0.5
+  reg: 1
+  alpha: 1
 
 optimizer_config:
+  epoch_based_backward: true
   weight_decay: 1.0e-5
   lr: 3.0e-3
   lr_scheduler: null

@@ -25,28 +25,37 @@ class Train(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters()
         self.load_model()
+        self.automatic_optimization = False
 
     def training_step(self, batch, batch_idx):
         out = self.model(batch, self.current_epoch, training=True)
-        loss, loss_dict = self.model.loss(out, batch, self.current_epoch, 'train')
+        loss_list, loss_dict = self.model.loss(out, batch, self.current_epoch, 'train')
         metrics = {**self.metrics(out, batch, mode='train'), **loss_dict}
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False, batch_size=1)
-        return loss
+        self.optimize_loss(loss_list)
     
     def validation_step(self, batch, batch_idx):
         out = self.model(batch, self.current_epoch, training=False)
-        loss, loss_dict = self.model.loss(out, batch, self.current_epoch, 'val')
+        loss_list, loss_dict = self.model.loss(out, batch, self.current_epoch, 'val')
         metrics = {**self.metrics(out, batch, mode='val'), **loss_dict}
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False, batch_size=1)
-        return loss
+        self.optimize_loss(loss_list)
     
     def test_step(self, batch, batch_idx):
         out = self.model(batch, self.current_epoch, training=False)
-        loss, loss_dict = self.model.loss(out, batch, self.current_epoch, 'test')
+        loss_list, loss_dict = self.model.loss(out, batch, self.current_epoch, 'test')
         metrics = {**self.metrics(out, batch, mode='test'), **loss_dict}
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False, batch_size=1)
-        return loss
+        self.optimize_loss(loss_list)
     
+    def optimize_loss(self, loss_list):
+        assert len(loss_list) == len(self.optimizers())
+        for idx, loss in enumerate(loss_list):
+            optimizer = self.optimizers()[idx]
+            optimizer.zero_grad()
+            self.manual_backward(loss)
+            optimizer.step()
+
     def configure_optimizers(self):
         params_list = self.model.get_parameters()
         optimizers_and_schedulers = [self.configure_one_optimizer(self.hparams.optimizer_config, params) for params in params_list]

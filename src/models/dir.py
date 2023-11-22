@@ -1,99 +1,78 @@
 import numpy as np
 import torch
-from torch import nn
+from torch import nn, Tensor
+from torch.nn import Linear, ReLU
 from torch.nn import functional as F
 from torch_geometric.nn import LEConv
 from torch_geometric.utils import is_undirected, sort_edge_index, degree
 from torch_sparse import transpose
-
+from torch_geometric.nn.conv import MessagePassing
 
 class DIR(nn.Module):
     def __init__(self, model_config):
         super().__init__()
         self.backbone = None
         self.extractor = CausalAttNet(model_config)
+        self.reg = model_config['reg']
+        self.hidden_dim = hidden_dim = model_config['hidden_dim']
+        self.out_dim = out_dim = model_config['out_dim']
+        self.alpha = model_config['alpha']
 
-        self.learn_edge_att = model_config['learn_edge_att']
-        self.pred_loss_coef = model_config['pred_loss_coef']
-        self.info_loss_coef = model_config['info_loss_coef']
-        self.fix_r = model_config.get('fix_r', None)
-        self.init_r = model_config.get('init_r', 0.9)
-        self.decay_interval = model_config.get('decay_interval', None)
-        self.decay_r = model_config.get('decay_r', 0.1)
-        self.final_r = model_config.get('final_r', 0.7)
+        self.causal_pred = nn.Sequential(Linear(hidden_dim, 2*hidden_dim), ReLU(), Linear(2*hidden_dim, out_dim))
+        self.conf_mlp = torch.nn.Sequential(Linear(hidden_dim, 2*hidden_dim), ReLU(), Linear(2*hidden_dim, out_dim))
+        self.cq = Linear(out_dim, out_dim)
+        self.conf_pred = nn.Sequential(self.conf_mlp, self.cq)
+
+    def get_parameters(self):
+        return list(self.backbone.parameters())+list(self.extractor.parameters())+list(self.causal_pred.parameters())+list(self.conf_pred.parameters()), \
+            list(self.conf_pred.parameters())
 
     def forward(self, batch, epoch, training):
-        edge_index, batch_idx = batch['edge_index'], batch['batch']
-        emb = self.backbone.get_emb(batch)
-        att_log_logits = self.extractor(emb, edge_index, batch_idx)
-        att = self.sampling(att_log_logits, epoch, training)
-
-        if self.learn_edge_att:
-            if is_undirected(edge_index):
-                trans_idx, trans_val = transpose(edge_index, att, None, None, coalesced=False)
-                trans_val_perm = self.reorder_like(trans_idx, edge_index, trans_val)
-                edge_att = (att + trans_val_perm) / 2
-            else:
-                edge_att = att
-        else:
-            edge_att = self.lift_node_att_to_edge_att(att, edge_index)
-
-        preds = self.backbone(batch, edge_att)
-        return preds, edge_att, att
+        (causal_x, causal_edge_index, causal_edge_attr, causal_edge_weight, causal_batch),\
+                (conf_x, conf_edge_index, conf_edge_attr, conf_edge_weight, conf_batch), edge_score = self.extractor(batch)
+        set_masks(causal_edge_weight, self.backbone)
+        causal_batch = {'x': causal_x, 'edge_index': causal_edge_index, 'edge_attr': causal_edge_attr, 'batch': causal_batch}
+        causal_rep = self.backbone.get_graph_emb(causal_batch)
+        causal_out = self.causal_pred(causal_rep)
+        set_masks(conf_edge_weight, self.backbone)
+        conf_batch = {'x': conf_x, 'edge_index': conf_edge_index, 'edge_attr': conf_edge_attr, 'batch': conf_batch}
+        conf_rep = self.backbone.get_emb(conf_batch)
+        conf_out = self.conf_pred(conf_rep)
+        clear_masks(self.backbone)
+        return causal_out, conf_out, causal_rep, conf_rep
     
     def loss(self, out, batch, epoch, mode):
-        preds, edge_att, att = out
+        causal_out, conf_out, causal_rep, conf_rep = out
         labels = batch['y']
         
-        if preds.dim() == 1:
-            pred_loss = F.binary_cross_entropy_with_logits(preds, labels.float())
-        elif preds.dim() == 2:
-            pred_loss =  F.cross_entropy(preds, labels)
+        if causal_out.dim() == 1:
+            causal_loss = F.binary_cross_entropy_with_logits(causal_out, labels.float())
+        elif causal_out.dim() == 2:
+            causal_loss =  F.cross_entropy(causal_out, labels)
 
-        r = self.fix_r if self.fix_r else self.get_r(self.decay_interval, self.decay_r, epoch, final_r=self.final_r, init_r=self.init_r)
-        info_loss = (att * torch.log(att/r + 1e-6) + (1-att) * torch.log((1-att)/(1-r+1e-6) + 1e-6)).mean()
+        if conf_out.dim() == 1:
+            conf_loss = F.binary_cross_entropy_with_logits(causal_out, labels.float())
+        elif conf_out.dim() == 2:
+            conf_loss =  F.cross_entropy(causal_out, labels)
 
-        pred_loss = pred_loss * self.pred_loss_coef
-        info_loss = info_loss * self.info_loss_coef
-        loss = pred_loss + info_loss
-        loss_dict = {f'{mode}_loss': loss.item(), f'{mode}_pred_loss': pred_loss.item(), f'{mode}_info_loss': info_loss.item()}
-        return loss, loss_dict
+        env_loss = 0
+        alpha_prime = self.alpha * (epoch ** 1.6)
+        CELoss = nn.CrossEntropyLoss(reduction='mean')
+        if self.reg:
+            env_loss = torch.tensor([])
+            for conf in conf_rep:
+                rep_out = self.get_comb_pred(causal_rep, conf)
+                env_loss = torch.cat([env_loss, CELoss(rep_out, labels).unsqueeze(0)])
+            causal_loss += alpha_prime * env_loss.mean()
+            env_loss = alpha_prime * torch.var(env_loss * conf_rep.size(0))
+        
+        loss_dict = {f'{mode}_causal_loss': causal_loss.item(), f'{mode}_conf_loss': conf_loss.item(), f'{mode}_env_loss': env_loss.item()}
+        return [causal_loss+env_loss, conf_loss], loss_dict
     
-    def get_r(self, decay_interval, decay_r, current_epoch, init_r=0.9, final_r=0.5):
-        r = init_r - current_epoch // decay_interval * decay_r
-        if r < final_r:
-            r = final_r
-        return r
-    
-    def sampling(self, att_log_logits, epoch, training):
-        att = self.concrete_sample(att_log_logits, temp=1, training=training)
-        return att
-    
-    @staticmethod
-    def concrete_sample(att_log_logit, temp, training):
-        if training:
-            random_noise = torch.empty_like(att_log_logit).uniform_(1e-10, 1 - 1e-10)
-            random_noise = torch.log(random_noise) - torch.log(1.0 - random_noise)
-            att_bern = ((att_log_logit + random_noise) / temp).sigmoid()
-        else:
-            att_bern = (att_log_logit).sigmoid()
-        return att_bern
-    
-    def reorder_like(from_edge_index, to_edge_index, values):
-        from_edge_index, values = sort_edge_index(from_edge_index, values)
-        ranking_score = to_edge_index[0] * (to_edge_index.max()+1) + to_edge_index[1]
-        ranking = ranking_score.argsort().argsort()
-        if not (from_edge_index[:, ranking] == to_edge_index).all():
-            raise ValueError("Edges in from_edge_index and to_edge_index are different, impossible to match both.")
-        return values[ranking]
-    
-    @staticmethod
-    def lift_node_att_to_edge_att(node_att, edge_index):
-        src_lifted_att = node_att[edge_index[0]]
-        dst_lifted_att = node_att[edge_index[1]]
-        edge_att = src_lifted_att * dst_lifted_att
-        return edge_att
-
+    def get_comb_pred(self, causal_graph_x, conf_graph_x):
+        causal_pred = self.fc(causal_graph_x)
+        conf_pred = self.conf_mlp(conf_graph_x).detach()
+        return torch.sigmoid(conf_pred) * causal_pred
     
 class CausalAttNet(nn.Module):
     def __init__(self, model_config):
@@ -130,9 +109,24 @@ class CausalAttNet(nn.Module):
         conf_x, conf_edge_index, conf_batch, _ = relabel(x, conf_edge_index, batch_idx)
 
         return (causal_x, causal_edge_index, causal_edge_attr, causal_edge_weight, causal_batch),\
-                (conf_x, conf_edge_index, conf_edge_attr, conf_edge_weight, conf_batch),\
-                edge_score
-    
+                (conf_x, conf_edge_index, conf_edge_attr, conf_edge_weight, conf_batch), edge_score
+
+
+def set_masks(mask: Tensor, model: nn.Module):
+    for module in model.modules():
+        if isinstance(module, MessagePassing):
+            # Apply for pyg <= 2.0.2
+            module.__explain__ = True
+            module.__edge_mask__ = mask
+
+def clear_masks(model: nn.Module):
+    for module in model.modules():
+        if isinstance(module, MessagePassing):
+                # Apply for pyg <= 2.0.2
+                module.__explain__ = False
+                module.__edge_mask__ = None
+
+
 def split_graph(data, edge_score, ratio):
     causal_edge_index = torch.LongTensor([[],[]]).to(data.x.device)
     causal_edge_weight = torch.tensor([]).to(data.x.device)
