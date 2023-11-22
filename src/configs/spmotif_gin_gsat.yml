@@ -14,7 +14,18 @@ backbone_config:
   use_edge_attr: true
 
 model_config:
+  fix_r: false
+  init_r: 0.9
+  decay_interval: 10
+  decay_r: 0.1
+  final_r: 0.7
   ext_hidden_dim: 32
+  ext_dropout: 0.5
+  learn_edge_att: true
+  pred_loss_coef: 1
+  info_loss_coef: 1
+
+optimizer_config:
   weight_decay: 1.0e-5
   lr: 3.0e-3
   lr_scheduler: null

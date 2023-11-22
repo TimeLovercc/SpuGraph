@@ -34,46 +34,43 @@ class Train(pl.LightningModule):
         self.load_model()
 
     def training_step(self, batch, batch_idx):
-        out = self.model(batch)
-        loss = self.model.loss(out, batch, mode='train')
-        metrics = self.metrics(out, batch, mode='train')
-        self.log('train_loss', loss, on_step=False, on_epoch=True, prog_bar=False, batch_size=1)
+        out = self.model(batch, self.current_epoch, training=True)
+        loss, loss_dict = self.model.loss(out, batch, self.current_epoch, 'train')
+        metrics = {**self.metrics(out, batch, mode='train'), **loss_dict}
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False, batch_size=1)
         return loss
     
     def validation_step(self, batch, batch_idx):
-        out = self.model(batch)
-        loss = self.model.loss(out, batch, mode='val')
-        metrics = self.metrics(out, batch, mode='val')
-        self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=1)
+        out = self.model(batch, self.current_epoch, training=False)
+        loss, loss_dict = self.model.loss(out, batch, self.current_epoch, 'val')
+        metrics = {**self.metrics(out, batch, mode='val'), **loss_dict}
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False, batch_size=1)
         return loss
     
     def test_step(self, batch, batch_idx):
-        out = self.model(batch)
-        loss = self.model.loss(out, batch, mode='test')
-        metrics = self.metrics(out, batch, mode='test')
-        self.log('test_loss', loss, on_step=False, on_epoch=True, prog_bar=False, batch_size=1)
+        out = self.model(batch, self.current_epoch, training=False)
+        loss, loss_dict = self.model.loss(out, batch, self.current_epoch, 'test')
+        metrics = {**self.metrics(out, batch, mode='test'), **loss_dict}
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False, batch_size=1)
         return loss
     
     def configure_optimizers(self):
-        if 'weight_decay' in  self.hparams.model_config.keys():
-            weight_decay = self.hparams.model_config['weight_decay']
+        if 'weight_decay' in  self.hparams.optimizer_config.keys():
+            weight_decay = self.hparams.optimizer_config['weight_decay']
         else:
             weight_decay = 0
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.hparams.model_config['lr'], weight_decay=weight_decay)
-        if self.hparams.model_config['lr_scheduler'] == None:
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.hparams.optimizer_config['lr'], weight_decay=weight_decay)
+        if self.hparams.optimizer_config['lr_scheduler'] == None:
             return optimizer
         else:
-            if self.hparams.model_config['lr_scheduler'] == 'step':
+            if self.hparams.optimizer_config['lr_scheduler'] == 'step':
                 scheduler = lrs.StepLR(optimizer,
-                                       step_size=self.hparams.model_config['lr_decay_steps'],
-                                       gamma=self.hparams.model_config['lr_decay_rate'])
-            elif self.hparams.model_config['lr_scheduler'] == 'cosine':
+                                       step_size=self.hparams.optimizer_config['lr_decay_steps'],
+                                       gamma=self.hparams.optimizer_config['lr_decay_rate'])
+            elif self.hparams.optimizer_config['lr_scheduler'] == 'cosine':
                 scheduler = lrs.CosineAnnealingLR(optimizer,
-                                                  T_max=self.hparams.model_config['lr_decay_steps'],
-                                                  eta_min=self.hparams.model_config['lr_decay_min_lr'])
+                                                  T_max=self.hparams.optimizer_config['lr_decay_steps'],
+                                                  eta_min=self.hparams.optimizer_config['lr_decay_min_lr'])
             else:
                 raise ValueError('Invalid lr_scheduler type!')
             return [optimizer], [scheduler]
@@ -97,7 +94,7 @@ class Train(pl.LightningModule):
         self.model.backbone = Backbone(self.hparams.backbone_config)
     
     def metrics(self, out, batch, mode):
-        preds = out
+        preds = out[0] if isinstance(out, tuple) else out
         labels, groups = batch['y'], batch['env']
         unique_groups = torch.unique(groups)
 
@@ -190,7 +187,7 @@ def load_callbacks(args):
         refresh_rate=1
     ))
 
-    if args.model_config['lr_scheduler'] != None:
+    if args.optimizer_config['lr_scheduler'] != None:
         callbacks.append(plc.LearningRateMonitor(
             logging_interval='epoch'))
     return callbacks
