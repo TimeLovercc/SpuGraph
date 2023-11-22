@@ -5,8 +5,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-import numpy as np
 import torch
+import torch.optim as optim
 import torch.optim.lr_scheduler as lrs
 import torch_geometric.transforms as T
 import pytorch_lightning as pl
@@ -16,14 +16,7 @@ from pytorch_lightning.loggers import CSVLogger, WandbLogger
 from torch_geometric.data import Batch
 from torch_geometric.loader import DataLoader
 from torch_geometric.utils import degree
-from torchmetrics.functional.classification import (
-    binary_accuracy,
-    binary_auroc,
-    binary_f1_score,
-    multiclass_accuracy,
-    multiclass_auroc,
-    multiclass_f1_score,
-)
+from torchmetrics.functional.classification import binary_accuracy, multiclass_accuracy
 
 torch.set_float32_matmul_precision('medium')
 
@@ -55,25 +48,26 @@ class Train(pl.LightningModule):
         return loss
     
     def configure_optimizers(self):
-        if 'weight_decay' in  self.hparams.optimizer_config.keys():
-            weight_decay = self.hparams.optimizer_config['weight_decay']
-        else:
-            weight_decay = 0
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.hparams.optimizer_config['lr'], weight_decay=weight_decay)
-        if self.hparams.optimizer_config['lr_scheduler'] == None:
+        params_list = self.model.get_parameters()
+        optimizers_and_schedulers = [self.configure_one_optimizer(self.hparams.optimizer_config, params) for params in params_list]
+        optimizers = [result[0] for result in optimizers_and_schedulers]
+        schedulers = [result[1] for result in optimizers_and_schedulers if len(result) > 1]
+        return optimizers, schedulers
+        
+    def configure_one_optimizer(self, optimizer_config, params):
+        weight_decay = optimizer_config.get('weight_decay', 0)
+        optimizer = optim.Adam(params, lr=optimizer_config['lr'], weight_decay=weight_decay)
+        lr_scheduler_type = optimizer_config.get('lr_scheduler')
+        if lr_scheduler_type == 'step':
+            scheduler = lrs.StepLR(optimizer, step_size=optimizer_config['lr_decay_steps'], gamma=optimizer_config['lr_decay_rate'])
+            return optimizer, scheduler
+        elif lr_scheduler_type == 'cosine':
+            scheduler = lrs.CosineAnnealingLR(optimizer, T_max=optimizer_config['lr_decay_steps'], eta_min=optimizer_config['lr_decay_min_lr'])
+            return optimizer, scheduler
+        elif lr_scheduler_type is None:
             return optimizer
         else:
-            if self.hparams.optimizer_config['lr_scheduler'] == 'step':
-                scheduler = lrs.StepLR(optimizer,
-                                       step_size=self.hparams.optimizer_config['lr_decay_steps'],
-                                       gamma=self.hparams.optimizer_config['lr_decay_rate'])
-            elif self.hparams.optimizer_config['lr_scheduler'] == 'cosine':
-                scheduler = lrs.CosineAnnealingLR(optimizer,
-                                                  T_max=self.hparams.optimizer_config['lr_decay_steps'],
-                                                  eta_min=self.hparams.optimizer_config['lr_decay_min_lr'])
-            else:
-                raise ValueError('Invalid lr_scheduler type!')
-            return [optimizer], [scheduler]
+            raise ValueError('Invalid lr_scheduler type!')
 
     def load_model(self):
         model_name = self.hparams.model_name
@@ -207,10 +201,10 @@ def main():
     pl.seed_everything(args.seed)
     data_module = DInterface(**vars(args))
     feat_dim, edge_attr_dim, class_num, deg = data_module.get_in_out_dim()
-    args.backbone_config['in_dim'] = feat_dim
-    args.backbone_config['edge_attr_dim'] = edge_attr_dim
-    args.backbone_config['out_dim'] = class_num if class_num > 2 else 1
-    args.backbone_config['deg'] = deg
+    args.model_config['in_dim'] = args.backbone_config['in_dim'] = feat_dim
+    args.model_config['edge_attr_dim'] = args.backbone_config['edge_attr_dim'] = edge_attr_dim
+    args.model_config['out_dim'] = args.backbone_config['out_dim'] = class_num if class_num > 2 else 1
+    args.model_config['deg'] = args.backbone_config['deg'] = deg
 
     model = Train(**vars(args))
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
