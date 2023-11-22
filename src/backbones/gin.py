@@ -6,50 +6,47 @@ import torch.nn.functional as F
 from torch_geometric.nn import global_add_pool
 from ogb.graphproppred.mol_encoder import AtomEncoder, BondEncoder
 
-from .conv_layers import GINConv, GINEConv
+from conv_layers import GINConv, GINEConv
 
 
 class GIN(nn.Module):
-    def __init__(self, x_dim, edge_attr_dim, num_class, multi_label, model_config):
+    def __init__(self, backbone_config):
         super().__init__()
+        self.gc_layer = gc_layer = backbone_config['gc_layer']
+        self.in_dim = in_dim = backbone_config['in_dim']
+        self.edge_attr_dim = edge_attr_dim = backbone_config['edge_attr_dim'] 
+        self.hidden_dim = hidden_dim = backbone_config['hidden_dim']
+        self.out_dim = out_dim = backbone_config['out_dim']
+        self.p = dropout = backbone_config['dropout']
+        self.use_edge_attr = backbone_config.get('use_edge_attr', True)
 
-        self.n_layers = model_config['n_layers']
-        hidden_size = model_config['hidden_size']
-        self.edge_attr_dim = edge_attr_dim
-        self.dropout_p = model_config['dropout_p']
-        self.use_edge_attr = model_config.get('use_edge_attr', True)
-
-        if model_config.get('atom_encoder', False):
-            self.node_encoder = AtomEncoder(emb_dim=hidden_size)
-            if edge_attr_dim != 0 and self.use_edge_attr:
-                self.edge_encoder = BondEncoder(emb_dim=hidden_size)
-        else:
-            self.node_encoder = Linear(x_dim, hidden_size)
-            if edge_attr_dim != 0 and self.use_edge_attr:
-                self.edge_encoder = Linear(edge_attr_dim, hidden_size)
+        self.node_encoder = Linear(in_dim, hidden_dim)
+        if edge_attr_dim != 0 and self.use_edge_attr:
+            self.edge_encoder = Linear(edge_attr_dim, hidden_dim)
 
         self.convs = nn.ModuleList()
         self.relu = nn.ReLU()
         self.pool = global_add_pool
 
-        for _ in range(self.n_layers):
+        for _ in range(self.gc_layer):
             if edge_attr_dim != 0 and self.use_edge_attr:
-                self.convs.append(GINEConv(GIN.MLP(hidden_size, hidden_size), edge_dim=hidden_size))
+                self.convs.append(GINEConv(GIN.MLP(hidden_dim, hidden_dim), edge_dim=hidden_dim))
             else:
-                self.convs.append(GINConv(GIN.MLP(hidden_size, hidden_size)))
+                self.convs.append(GINConv(GIN.MLP(hidden_dim, hidden_dim)))
 
-        self.fc_out = nn.Sequential(nn.Linear(hidden_size, 1 if num_class == 2 and not multi_label else num_class))
+        self.fc = nn.Sequential(nn.Linear(hidden_dim, out_dim))
 
-    def forward(self, x, edge_index, batch, edge_attr=None, edge_atten=None):
+    def forward(self, batch, edge_att=None):
+        x, edge_index, edge_attr, batch = batch['x'], batch['edge_index'], batch['edge_attr'], batch['batch']
         x = self.node_encoder(x)
         if edge_attr is not None and self.use_edge_attr:
             edge_attr = self.edge_encoder(edge_attr)
 
-        for i in range(self.n_layers):
-            x = self.convs[i](x, edge_index, edge_attr=edge_attr, edge_atten=edge_atten)
+        for i in range(self.gc_layer):
+            x = self.convs[i](x, edge_index, edge_attr=edge_attr, edge_atten=edge_att)
             x = self.relu(x)
-            x = F.dropout(x, p=self.dropout_p, training=self.training)
-        return self.fc_out(self.pool(x, batch))
+            x = F.dropout(x, p=self.p, training=self.training)
+        return self.fc(self.pool(x, batch))
 
     @staticmethod
     def MLP(in_channels: int, out_channels: int):
@@ -60,16 +57,17 @@ class GIN(nn.Module):
             Linear(out_channels, out_channels),
         )
 
-    def get_emb(self, x, edge_index, batch, edge_attr=None, edge_atten=None):
+    def get_emb(self, batch, edge_att=None):
+        x, edge_index, edge_attr, batch = batch['x'], batch['edge_index'], batch['edge_attr'], batch['batch']
         x = self.node_encoder(x)
         if edge_attr is not None and self.use_edge_attr:
             edge_attr = self.edge_encoder(edge_attr)
 
-        for i in range(self.n_layers):
-            x = self.convs[i](x, edge_index, edge_attr=edge_attr, edge_atten=edge_atten)
+        for i in range(self.gc_layer):
+            x = self.convs[i](x, edge_index, edge_attr=edge_attr, edge_atten=edge_att)
             x = self.relu(x)
-            x = F.dropout(x, p=self.dropout_p, training=self.training)
+            x = F.dropout(x, p=self.p, training=self.training)
         return x
 
     def get_pred_from_emb(self, emb, batch):
-        return self.fc_out(self.pool(emb, batch))
+        return self.fc(self.pool(emb, batch))

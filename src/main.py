@@ -168,10 +168,12 @@ class DInterface(pl.LightningDataModule):
     
     def get_in_out_dim(self):
         feat_dim = self.dataset.num_features
+        edge_attr_dim = self.dataset.num_edge_features
         class_num = self.dataset.num_classes
         print(f'Feature dimension: {feat_dim}')
+        print(f'Edge feature dimension: {edge_attr_dim}')
         print(f'Number of classes: {class_num}')
-        return feat_dim, class_num
+        return feat_dim, edge_attr_dim, class_num
 
 def load_callbacks(args):
     callbacks = []
@@ -213,8 +215,9 @@ def main():
     
     pl.seed_everything(args.seed)
     data_module = DInterface(**vars(args))
-    feat_dim, class_num = data_module.get_in_out_dim()
+    feat_dim, edge_attr_dim, class_num = data_module.get_in_out_dim()
     args.backbone_config['in_dim'] = feat_dim
+    args.backbone_config['edge_attr_dim'] = edge_attr_dim
     args.backbone_config['out_dim'] = class_num if class_num > 2 else 1
 
     model = Train(**vars(args))
