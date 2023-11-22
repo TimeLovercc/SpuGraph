@@ -1,6 +1,5 @@
 import argparse
 import importlib
-import inspect
 import yaml
 import sys
 from datetime import datetime
@@ -14,7 +13,9 @@ import pytorch_lightning as pl
 import pytorch_lightning.callbacks as plc
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import CSVLogger, WandbLogger
+from torch_geometric.data import Batch
 from torch_geometric.loader import DataLoader
+from torch_geometric.utils import degree
 from torchmetrics.functional.classification import (
     binary_accuracy,
     binary_auroc,
@@ -94,16 +95,6 @@ class Train(pl.LightningModule):
             raise ValueError(f'Invalid Backbone File Name or Invalid Class Name {backbone_name}.{backbone_upper_name}!')
         self.model = Model(self.hparams.model_config)
         self.model.backbone = Backbone(self.hparams.backbone_config)
-
-    # def instancialize(self, Model, is_backbone, **other_args):
-    #     class_args = inspect.getfullargspec(Model.__init__).args[1:]
-    #     inkeys = self.hparams.model_config.keys() if not is_backbone else self.hparams.backbone_config.keys()
-    #     args1 = {}
-    #     for arg in class_args:
-    #         if arg in inkeys:
-    #             args1[arg] = self.hparams.model_config[arg] if not is_backbone else self.hparams.backbone_config[arg]
-    #     args1.update(other_args)
-    #     return Model(**args1)
     
     def metrics(self, out, batch, mode):
         preds = out
@@ -170,19 +161,22 @@ class DInterface(pl.LightningDataModule):
         feat_dim = self.dataset.num_features
         edge_attr_dim = self.dataset.num_edge_features
         class_num = self.dataset.num_classes
+        batched_train_set = Batch.from_data_list(self.dataset)
+        d = degree(batched_train_set.edge_index[1], num_nodes=batched_train_set.num_nodes, dtype=torch.long)
+        deg = torch.bincount(d, minlength=10)
         print(f'Feature dimension: {feat_dim}')
         print(f'Edge feature dimension: {edge_attr_dim}')
         print(f'Number of classes: {class_num}')
-        return feat_dim, edge_attr_dim, class_num
+        return feat_dim, edge_attr_dim, class_num, deg
 
 def load_callbacks(args):
     callbacks = []
-    # callbacks.append(plc.EarlyStopping(
-    #     monitor='val_loss',
-    #     mode='min',
-    #     patience=30,
-    #     min_delta=1
-    # ))
+    callbacks.append(plc.EarlyStopping(
+        monitor='val_loss',
+        mode='min',
+        patience=30,
+        min_delta=1
+    ))
 
     callbacks.append(plc.ModelCheckpoint(
         monitor='val_loss',
@@ -215,10 +209,11 @@ def main():
     
     pl.seed_everything(args.seed)
     data_module = DInterface(**vars(args))
-    feat_dim, edge_attr_dim, class_num = data_module.get_in_out_dim()
+    feat_dim, edge_attr_dim, class_num, deg = data_module.get_in_out_dim()
     args.backbone_config['in_dim'] = feat_dim
     args.backbone_config['edge_attr_dim'] = edge_attr_dim
     args.backbone_config['out_dim'] = class_num if class_num > 2 else 1
+    args.backbone_config['deg'] = deg
 
     model = Train(**vars(args))
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
