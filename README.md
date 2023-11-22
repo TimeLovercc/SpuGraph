@@ -65,6 +65,11 @@ The `configs` directory contains YAML files for different experimental setups. T
 ## Models
 The `models` directory contains implementations of different graph neural network models. You can extend these models or use them as templates to implement your own models.
 
+## Problems
+1. CIGA has many different backbones, where should we put them? Maybe backbones.
+2. CIGA and DIR have some same name methods, should we put them in a same file?
+3. Should we add a function to select representation or raw? Maybe not.
+
 ## Contributing
 Contributions to the SpuGraph project are welcome. Please follow the standard procedures for contributing to a GitHub project:
 
