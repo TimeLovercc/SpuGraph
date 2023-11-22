@@ -61,11 +61,13 @@ class Train(pl.LightningModule):
         for idx, loss in enumerate(loss_list):
             optimizer = self.optimizers()[idx]
             optimizer.zero_grad()
-            self.manual_backward(loss, retrain_graph=False if idx == len(loss_list)-1 else True)
-            optimizer.step()
+            self.manual_backward(loss)
+        self.optimizers()[0].step()
+        self.optimizers()[1].step()
 
     def configure_optimizers(self):
         params_list = self.model.get_parameters()
+        print(len(params_list))
         optimizers_and_schedulers = [self.configure_one_optimizer(self.hparams.optimizer_config, params) for params in params_list]
         optimizers = [result[0] for result in optimizers_and_schedulers]
         schedulers = [result[1] for result in optimizers_and_schedulers if result[1] is not None]

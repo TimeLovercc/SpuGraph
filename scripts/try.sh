@@ -1,3 +1,3 @@
 
 # try bail GCN
-CUDA_VISIBLE_DEVICES=1 python ./src/main.py --dataset_name spmotif --backbone_name gin --model_name dir --seed 3
+CUDA_VISIBLE_DEVICES=0 python ./src/main.py --dataset_name spmotif --backbone_name gin --model_name dir --seed 3

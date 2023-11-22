@@ -25,7 +25,7 @@ class DIR(nn.Module):
 
     def get_parameters(self):
         return list(self.backbone.parameters())+list(self.extractor.parameters())+list(self.causal_pred.parameters())+list(self.conf_pred.parameters()), \
-            list(self.conf_pred.parameters())
+            self.conf_pred.parameters()
 
     def forward(self, batch, epoch, training):
         (causal_x, causal_edge_index, causal_edge_attr, causal_edge_weight, causal_batch),\
@@ -67,8 +67,8 @@ class DIR(nn.Module):
             causal_loss += alpha_prime * env_loss_tensor.mean()
             env_loss = alpha_prime * torch.var(env_loss_tensor * conf_rep.size(0))
         
-        loss_dict = {f'{mode}_loss': causal_loss + env_loss, f'{mode}_causal_loss': causal_loss, f'{mode}_conf_loss': conf_loss, f'{mode}_env_loss': env_loss}
-        return [causal_loss+env_loss, conf_loss], loss_dict
+        loss_dict = {f'{mode}_loss': causal_loss.item() + env_loss.item(), f'{mode}_causal_loss': causal_loss.item(), f'{mode}_conf_loss': conf_loss.item(), f'{mode}_env_loss': env_loss.item()}
+        return causal_loss+env_loss+conf_loss, loss_dict
     
     def get_comb_pred(self, causal_graph_x, conf_graph_x):
         causal_pred = self.causal_pred(causal_graph_x)
