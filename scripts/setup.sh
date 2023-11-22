@@ -7,7 +7,7 @@
 # This need to type in mannualy, yes, enter, yes. Then reopen
 
 # Make sure the correct conda, make sure they are in .bashrc
-export PATH=~/anaconda3/bin:$PATH
+# export PATH=~/anaconda3/bin:$PATH
 # export PATH=/home/zzg5107/anaconda3/envs/pytorch/bin/:$PATH
 
 # Create a new conda environment named pytorch with Python 3.9
