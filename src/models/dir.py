@@ -23,10 +23,6 @@ class DIR(nn.Module):
         self.cq = Linear(out_dim, out_dim)
         self.conf_pred = nn.Sequential(self.conf_mlp, self.cq)
 
-    def get_parameters(self):
-        return list(self.backbone.parameters())+list(self.extractor.parameters())+list(self.causal_pred.parameters())+list(self.conf_pred.parameters()), \
-            self.conf_pred.parameters()
-
     def forward(self, batch, epoch, training):
         (causal_x, causal_edge_index, causal_edge_attr, causal_edge_weight, causal_batch),\
                 (conf_x, conf_edge_index, conf_edge_attr, conf_edge_weight, conf_batch), edge_score = self.extractor(batch)
@@ -55,7 +51,6 @@ class DIR(nn.Module):
         elif conf_out.dim() == 2:
             conf_loss =  F.cross_entropy(conf_out, labels)
 
-        env_loss = 0
         alpha_prime = self.alpha * (epoch ** 1.6)
         CELoss = nn.CrossEntropyLoss(reduction='mean')
         if self.reg:
@@ -67,8 +62,9 @@ class DIR(nn.Module):
             causal_loss += alpha_prime * env_loss_tensor.mean()
             env_loss = alpha_prime * torch.var(env_loss_tensor * conf_rep.size(0))
         
-        loss_dict = {f'{mode}_loss': causal_loss.item() + env_loss.item(), f'{mode}_causal_loss': causal_loss.item(), f'{mode}_conf_loss': conf_loss.item(), f'{mode}_env_loss': env_loss.item()}
-        return causal_loss+env_loss+conf_loss, loss_dict
+        total_loss = causal_loss + conf_loss + env_loss if self.reg else causal_loss + conf_loss
+        loss_dict = {f'{mode}_loss': total_loss.item(), f'{mode}_causal_loss': causal_loss.item(), f'{mode}_conf_loss': conf_loss.item(), f'{mode}_env_loss': env_loss.item() if self.reg else 0}
+        return total_loss, loss_dict
     
     def get_comb_pred(self, causal_graph_x, conf_graph_x):
         causal_pred = self.causal_pred(causal_graph_x)

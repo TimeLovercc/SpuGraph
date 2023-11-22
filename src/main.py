@@ -30,52 +30,41 @@ class Train(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         out = self.model(batch, self.current_epoch, training=True)
-        loss_list, loss_dict = self.model.loss(out, batch, self.current_epoch, 'train')
+        loss, loss_dict = self.model.loss(out, batch, self.current_epoch, 'train')
         metrics = {**self.metrics(out, batch, mode='train'), **loss_dict}
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False, batch_size=1)
         if self.hparams.optimizer_config['epoch_based_backward']:
-            self.accumulated_loss = [0.0] * len(loss_list) if self.accumulated_loss is None else self.accumulated_loss
-            self.accumulated_loss = [acc_loss + loss for acc_loss, loss in zip(self.accumulated_loss, loss_list)]
+            self.accumulated_loss = 0 if batch_idx == 0 else self.accumulated_loss
+            self.accumulated_loss += loss
         else:
-            self.optimize_loss(loss_list)
+            self.optimize_loss(loss)
 
     def on_train_epoch_end(self):
         if self.hparams.optimizer_config['epoch_based_backward']:
             self.optimize_loss(self.accumulated_loss)
-        self.accumulated_loss = None
     
     def validation_step(self, batch, batch_idx):
         out = self.model(batch, self.current_epoch, training=False)
-        loss_list, loss_dict = self.model.loss(out, batch, self.current_epoch, 'val')
+        loss, loss_dict = self.model.loss(out, batch, self.current_epoch, 'val')
         metrics = {**self.metrics(out, batch, mode='val'), **loss_dict}
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False, batch_size=1)
     
     def test_step(self, batch, batch_idx):
         out = self.model(batch, self.current_epoch, training=False)
-        loss_list, loss_dict = self.model.loss(out, batch, self.current_epoch, 'test')
+        loss, loss_dict = self.model.loss(out, batch, self.current_epoch, 'test')
         metrics = {**self.metrics(out, batch, mode='test'), **loss_dict}
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False, batch_size=1)
 
-    def optimize_loss(self, loss_list):
-        assert len(loss_list) == len(self.optimizers())
-        for idx, loss in enumerate(loss_list):
-            optimizer = self.optimizers()[idx]
-            optimizer.zero_grad()
-            self.manual_backward(loss)
-        self.optimizers()[0].step()
-        self.optimizers()[1].step()
-
-    def configure_optimizers(self):
-        params_list = self.model.get_parameters()
-        print(len(params_list))
-        optimizers_and_schedulers = [self.configure_one_optimizer(self.hparams.optimizer_config, params) for params in params_list]
-        optimizers = [result[0] for result in optimizers_and_schedulers]
-        schedulers = [result[1] for result in optimizers_and_schedulers if result[1] is not None]
-        return optimizers, schedulers
+    def optimize_loss(self, loss):
+        opt = self.optimizers()
+        opt.zero_grad()
+        self.manual_backward(loss)
+        opt.step()
         
-    def configure_one_optimizer(self, optimizer_config, params):
+    def configure_optimizers(self):
+        optimizer_config = self.hparams.optimizer_config
         weight_decay = optimizer_config.get('weight_decay', 0)
-        optimizer = optim.Adam(params, lr=optimizer_config['lr'], weight_decay=weight_decay)
+        optimizer = optim.Adam(self.model.parameters(), lr=optimizer_config['lr'], weight_decay=weight_decay)
         lr_scheduler_type = optimizer_config.get('lr_scheduler')
         if lr_scheduler_type == 'step':
             scheduler = lrs.StepLR(optimizer, step_size=optimizer_config['lr_decay_steps'], gamma=optimizer_config['lr_decay_rate'])
@@ -84,7 +73,7 @@ class Train(pl.LightningModule):
             scheduler = lrs.CosineAnnealingLR(optimizer, T_max=optimizer_config['lr_decay_steps'], eta_min=optimizer_config['lr_decay_min_lr'])
             return optimizer, scheduler
         elif lr_scheduler_type is None:
-            return optimizer, None
+            return optimizer
         else:
             raise ValueError('Invalid lr_scheduler type!')
 
