@@ -5,13 +5,13 @@ data_config:
   fg_only: false
   generate: false
   batch_size: 128
-  use_edge_attr: true
 
 backbone_config:
   hidden_dim: 32
   dropout: 0.5
   gc_layer: 2
   bn: false
+  use_edge_attr: true
 
 model_config:
   weight_decay: 1.0e-5

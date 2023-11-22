@@ -11,11 +11,10 @@ backbone_config:
   dropout: 0.5
   gc_layer: 2
   bn: false
-  aggregators: [mean, min, max, std, sum]
-  scalers: false
   use_edge_attr: true
 
 model_config:
+  ext_hidden_dim: 32
   weight_decay: 1.0e-5
   lr: 3.0e-3
   lr_scheduler: null
