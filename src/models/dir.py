@@ -36,7 +36,7 @@ class DIR(nn.Module):
         causal_out = self.causal_pred(causal_rep)
         set_masks(conf_edge_weight, self.backbone)
         conf_batch = {'x': conf_x, 'edge_index': conf_edge_index, 'edge_attr': conf_edge_attr, 'batch': conf_batch}
-        conf_rep = self.backbone.get_emb(conf_batch)
+        conf_rep = self.backbone.get_graph_emb(conf_batch)
         conf_out = self.conf_pred(conf_rep)
         clear_masks(self.backbone)
         return causal_out, conf_out, causal_rep, conf_rep
@@ -51,26 +51,27 @@ class DIR(nn.Module):
             causal_loss =  F.cross_entropy(causal_out, labels)
 
         if conf_out.dim() == 1:
-            conf_loss = F.binary_cross_entropy_with_logits(causal_out, labels.float())
+            conf_loss = F.binary_cross_entropy_with_logits(conf_out, labels.float())
         elif conf_out.dim() == 2:
-            conf_loss =  F.cross_entropy(causal_out, labels)
+            conf_loss =  F.cross_entropy(conf_out, labels)
 
         env_loss = 0
         alpha_prime = self.alpha * (epoch ** 1.6)
         CELoss = nn.CrossEntropyLoss(reduction='mean')
         if self.reg:
-            env_loss = torch.tensor([])
+            env_loss_list = []
             for conf in conf_rep:
                 rep_out = self.get_comb_pred(causal_rep, conf)
-                env_loss = torch.cat([env_loss, CELoss(rep_out, labels).unsqueeze(0)])
-            causal_loss += alpha_prime * env_loss.mean()
-            env_loss = alpha_prime * torch.var(env_loss * conf_rep.size(0))
+                env_loss_list.append(CELoss(rep_out, labels))
+            env_loss_tensor = torch.stack(env_loss_list)
+            causal_loss += alpha_prime * env_loss_tensor.mean()
+            env_loss = alpha_prime * torch.var(env_loss_tensor * conf_rep.size(0))
         
-        loss_dict = {f'{mode}_causal_loss': causal_loss.item(), f'{mode}_conf_loss': conf_loss.item(), f'{mode}_env_loss': env_loss.item()}
+        loss_dict = {f'{mode}_loss': causal_loss + env_loss, f'{mode}_causal_loss': causal_loss, f'{mode}_conf_loss': conf_loss, f'{mode}_env_loss': env_loss}
         return [causal_loss+env_loss, conf_loss], loss_dict
     
     def get_comb_pred(self, causal_graph_x, conf_graph_x):
-        causal_pred = self.fc(causal_graph_x)
+        causal_pred = self.causal_pred(causal_graph_x)
         conf_pred = self.conf_mlp(conf_graph_x).detach()
         return torch.sigmoid(conf_pred) * causal_pred
     
@@ -90,7 +91,7 @@ class CausalAttNet(nn.Module):
         )
     
     def forward(self, batch):
-        x, edge_index, edge_attr, batch_idx = batch
+        x, edge_index, edge_attr, batch_idx = batch.x, batch.edge_index, batch.edge_attr, batch.batch
         x = F.relu(self.conv1(x, edge_index, edge_attr.view(-1)))
         x = self.conv2(x, edge_index, edge_attr.view(-1))
 

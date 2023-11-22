@@ -47,18 +47,9 @@ class GIN(nn.Module):
             x = F.dropout(x, p=self.p, training=self.training)
         return self.fc(self.pool(x, batch))
 
-    @staticmethod
-    def MLP(in_channels: int, out_channels: int):
-        return nn.Sequential(
-            Linear(in_channels, out_channels),
-            nn.BatchNorm1d(out_channels),
-            nn.ReLU(inplace=True),
-            Linear(out_channels, out_channels),
-        )
-
     def get_emb(self, batch, edge_att=None):
         x, edge_index, edge_attr, batch = batch['x'], batch['edge_index'], batch['edge_attr'], batch['batch']
-        x = self.node_encoder(x)
+        x = self.node_encoder(x) if x.shape[1] == self.in_dim else x
         if edge_attr is not None and self.use_edge_attr:
             edge_attr = self.edge_encoder(edge_attr)
 
@@ -70,3 +61,18 @@ class GIN(nn.Module):
 
     def get_pred_from_emb(self, emb, batch):
         return self.fc(self.pool(emb, batch))
+    
+    def get_graph_emb(self, batch, edge_att=None):
+        batch_idx = batch['batch']
+        node_x = self.get_emb(batch, edge_att=edge_att)
+        graph_x = self.pool(node_x, batch_idx)
+        return graph_x
+
+    @staticmethod
+    def MLP(in_channels: int, out_channels: int):
+        return nn.Sequential(
+            Linear(in_channels, out_channels),
+            nn.BatchNorm1d(out_channels),
+            nn.ReLU(inplace=True),
+            Linear(out_channels, out_channels),
+        )

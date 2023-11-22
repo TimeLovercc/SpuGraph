@@ -26,41 +26,49 @@ class Train(pl.LightningModule):
         self.save_hyperparameters()
         self.load_model()
         self.automatic_optimization = False
+        self.accumulated_loss = None
 
     def training_step(self, batch, batch_idx):
         out = self.model(batch, self.current_epoch, training=True)
         loss_list, loss_dict = self.model.loss(out, batch, self.current_epoch, 'train')
         metrics = {**self.metrics(out, batch, mode='train'), **loss_dict}
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False, batch_size=1)
-        self.optimize_loss(loss_list)
+        if self.hparams.optimizer_config['epoch_based_backward']:
+            self.accumulated_loss = [0.0] * len(loss_list) if self.accumulated_loss is None else self.accumulated_loss
+            self.accumulated_loss = [acc_loss + loss for acc_loss, loss in zip(self.accumulated_loss, loss_list)]
+        else:
+            self.optimize_loss(loss_list)
+
+    def on_train_epoch_end(self):
+        if self.hparams.optimizer_config['epoch_based_backward']:
+            self.optimize_loss(self.accumulated_loss)
+        self.accumulated_loss = None
     
     def validation_step(self, batch, batch_idx):
         out = self.model(batch, self.current_epoch, training=False)
         loss_list, loss_dict = self.model.loss(out, batch, self.current_epoch, 'val')
         metrics = {**self.metrics(out, batch, mode='val'), **loss_dict}
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False, batch_size=1)
-        self.optimize_loss(loss_list)
     
     def test_step(self, batch, batch_idx):
         out = self.model(batch, self.current_epoch, training=False)
         loss_list, loss_dict = self.model.loss(out, batch, self.current_epoch, 'test')
         metrics = {**self.metrics(out, batch, mode='test'), **loss_dict}
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=False, batch_size=1)
-        self.optimize_loss(loss_list)
-    
+
     def optimize_loss(self, loss_list):
         assert len(loss_list) == len(self.optimizers())
         for idx, loss in enumerate(loss_list):
             optimizer = self.optimizers()[idx]
             optimizer.zero_grad()
-            self.manual_backward(loss)
+            self.manual_backward(loss, retrain_graph=False if idx == len(loss_list)-1 else True)
             optimizer.step()
 
     def configure_optimizers(self):
         params_list = self.model.get_parameters()
         optimizers_and_schedulers = [self.configure_one_optimizer(self.hparams.optimizer_config, params) for params in params_list]
         optimizers = [result[0] for result in optimizers_and_schedulers]
-        schedulers = [result[1] for result in optimizers_and_schedulers if len(result) > 1]
+        schedulers = [result[1] for result in optimizers_and_schedulers if result[1] is not None]
         return optimizers, schedulers
         
     def configure_one_optimizer(self, optimizer_config, params):
@@ -74,7 +82,7 @@ class Train(pl.LightningModule):
             scheduler = lrs.CosineAnnealingLR(optimizer, T_max=optimizer_config['lr_decay_steps'], eta_min=optimizer_config['lr_decay_min_lr'])
             return optimizer, scheduler
         elif lr_scheduler_type is None:
-            return optimizer
+            return optimizer, None
         else:
             raise ValueError('Invalid lr_scheduler type!')
 
@@ -214,6 +222,7 @@ def main():
     args.model_config['edge_attr_dim'] = args.backbone_config['edge_attr_dim'] = edge_attr_dim
     args.model_config['out_dim'] = args.backbone_config['out_dim'] = class_num if class_num > 2 else 1
     args.model_config['deg'] = args.backbone_config['deg'] = deg
+    args.model_config['hidden_dim'] = args.backbone_config['hidden_dim']
 
     model = Train(**vars(args))
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
