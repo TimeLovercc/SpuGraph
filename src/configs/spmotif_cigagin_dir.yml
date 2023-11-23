@@ -12,6 +12,9 @@ backbone_config:
   gc_layer: 2
   bn: false
   use_edge_attr: true
+  residual: true
+  JK: true
+  pooling: mean
 
 model_config:
   ratio: 0.5

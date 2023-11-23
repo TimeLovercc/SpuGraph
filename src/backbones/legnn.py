@@ -2,7 +2,7 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
 
-from base import BASE
+from SpuGraph.src.backbones.bbase import BASE
 from convs import LEConv
 
 class LEGNN(BASE):

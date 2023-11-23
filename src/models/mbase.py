@@ -9,7 +9,7 @@ from torch_geometric.utils import is_undirected, sort_edge_index, degree
 from torch_sparse import transpose
 from torch_geometric.nn.conv import MessagePassing
 
-class BASE(nn.Module):
+class MBASE(nn.Module):
     def __init__(self, model_config):
         super().__init__()
         self.backbone = None
@@ -44,11 +44,11 @@ class BASE(nn.Module):
     def get_edge_att(self, batch, node_emb):
         row, col = batch.edge_index
         edge_rep = torch.cat([node_emb[row], node_emb[col]], dim=-1)
-        edge_att = self.extractor(edge_rep).view(-1)
+        edge_att = self.edge_mlp(edge_rep).view(-1)
         return edge_att
     
     def get_splited_graph(self, batch, edge_att, node_emb, ratio):
-        if self.ratio < 0:
+        if ratio < 0:
             (causal_edge_index, causal_edge_attr, causal_edge_att), \
                 (spu_edge_index, spu_edge_attr, spu_edge_att) = (batch.edge_index, batch.edge_attr, edge_att), \
                 (batch.edge_index, batch.edge_attr, edge_att)
@@ -56,15 +56,11 @@ class BASE(nn.Module):
             (causal_edge_index, causal_edge_attr, causal_edge_att), \
                 (spu_edge_index, spu_edge_attr, spu_edge_att) = split_graph(batch, edge_att, self.ratio)
             
-        if self.c_in.lower() == 'raw':
-            causal_x, causal_edge_index, causal_batch, _ = relabel(batch.x, causal_edge_index, batch.batch)
-            spu_x, spu_edge_index, spu_batch, _ = relabel(batch.x, spu_edge_index, batch.batch)
-        else:
-            causal_x, causal_edge_index, causal_batch, _ = relabel(node_emb, causal_edge_index, batch.batch)
-            spu_x, spu_edge_index, spu_batch, _ = relabel(node_emb, spu_edge_index, batch.batch)
+        causal_x, causal_edge_index, causal_batch, _ = relabel(node_emb, causal_edge_index, batch.batch)
+        spu_x, spu_edge_index, spu_batch, _ = relabel(node_emb, spu_edge_index, batch.batch)
 
         causal_batch = {'x': causal_x, 'edge_index': causal_edge_index, 'edge_attr': causal_edge_attr, 'batch': causal_batch}
-        conf_batch = {'x': spu_x, 'edge_index': spu_edge_index, 'edge_attr': spu_edge_attr, 'batch': spu_batch}
+        spu_batch = {'x': spu_x, 'edge_index': spu_edge_index, 'edge_attr': spu_edge_attr, 'batch': spu_batch}
 
         return causal_batch, spu_batch, causal_edge_att, spu_edge_att
 

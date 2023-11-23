@@ -72,6 +72,7 @@ The `models` directory contains implementations of different graph neural networ
 4. What if we have too many redundant codes? Use base class to reduce the redundant codes.
 5. For node encoder, three cases, 1, -1, >1.
 6. For a new backbone, first define new layer type (add edge_att in conv), then use the base class to implement the new backbone.
+7. How to solve the explain message problem? 
 
 ## Contributing
 Contributions to the SpuGraph project are welcome. Please follow the standard procedures for contributing to a GitHub project:

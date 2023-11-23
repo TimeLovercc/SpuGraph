@@ -4,11 +4,10 @@ from torch.nn import functional as F
 from torch_geometric.nn import global_mean_pool, global_add_pool, global_max_pool, GlobalAttention, Set2Set
 from ogb.graphproppred.mol_encoder import AtomEncoder, BondEncoder
 
-class BASE(nn.Module):
+class BBASE(nn.Module):
     def __init__(self, backbone_config):
         super().__init__()
         self.gc_layer = gc_layer = backbone_config['gc_layer']
-        self.gc_type = gc_type = backbone_config['gc_type']
         self.in_dim = in_dim = backbone_config['in_dim']
         self.edge_attr_dim = edge_attr_dim = backbone_config['edge_attr_dim']
         self.hidden_dim = hidden_dim = backbone_config['hidden_dim']
@@ -80,7 +79,7 @@ class BASE(nn.Module):
     
     def forward(self, batch, training, edge_att=None):
         x_encode = self.encode_node(batch)
-        node_emb = self.get_node_emb(x_encode, batch, training, edge_att=edge_att)
+        node_emb = self.get_node_emb(x_encode, batch, training, edge_att)
         return node_emb
     
     

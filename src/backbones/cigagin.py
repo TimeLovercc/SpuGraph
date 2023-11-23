@@ -2,10 +2,10 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
 
-from base import BASE
+from bbase import BBASE
 from convs import GINConv
 
-class CIGA_GIN(BASE):
+class CIGAGIN(BBASE):
     def __init__(self, backbone_config):
         super().__init__(backbone_config)
         self.residual = backbone_config['residual']
@@ -20,8 +20,8 @@ class CIGA_GIN(BASE):
 
         self.weights_init()
     
-    def get_node_emb(self, x_encode, batch, edge_att=None):
-        x, edge_index, edge_attr, batch_idx = batch['x'], batch['edge_index'], batch['edge_attr'], batch['batch_idx']
+    def get_node_emb(self, x_encode, batch, training, edge_att=None):
+        x, edge_index, edge_attr, batch_idx = batch['x'], batch['edge_index'], batch['edge_attr'], batch['batch']
         h_list = [x_encode]
 
         for layer in range(self.gc_layer):
@@ -30,9 +30,9 @@ class CIGA_GIN(BASE):
 
             if layer == self.gc_layer - 1:
                 #remove relu for the last layer
-                h = F.dropout(h, self.p, training=self.training)
+                h = F.dropout(h, self.p, training=training)
             else:
-                h = F.dropout(F.relu(h), self.p, training=self.training)
+                h = F.dropout(F.relu(h), self.p, training=training)
 
             if self.residual:
                 h = h + h_list[layer]
