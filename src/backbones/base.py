@@ -65,17 +65,22 @@ class BASE(nn.Module):
         edge_encode = self.edge_encoder(edge_attr)
         return edge_encode
     
-    def get_node_emb(self, x_encode, batch, edge_att=None):
+    def get_node_emb(self, x_encode, batch, training, edge_att=None):
         edge_weight = batch['edge_attr']
         for conv, relu in zip(self.convs, self.relus):
             x_encode = conv(x_encode, batch['edge_index'], edge_weight=edge_weight, edge_atten=edge_att)
             x_encode = relu(x_encode)
-            x_encode = F.dropout(x_encode, p=self.p, training=self.training)
+            x_encode = F.dropout(x_encode, p=self.p, training=training)
         node_emb = x_encode
         return node_emb
     
     def get_graph_emb(self, node_emb, batch):
         graph_emb = self.pool(node_emb, batch['batch'])
         return graph_emb
+    
+    def forward(self, batch, training, edge_att=None):
+        x_encode = self.encode_node(batch)
+        node_emb = self.get_node_emb(x_encode, batch, training, edge_att=edge_att)
+        return node_emb
     
     

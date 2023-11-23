@@ -95,10 +95,6 @@ class CausalAttNet(nn.Module):
         edge_rep = torch.cat([x[row], x[col]], dim=-1)
         edge_score = self.mlp(edge_rep).view(-1)
 
-        row, col = edge_index
-        edge_rep = torch.cat([x[row], x[col]], dim=-1)
-        edge_score = self.mlp(edge_rep).view(-1)
-
         (causal_edge_index, causal_edge_attr, causal_edge_weight), \
         (conf_edge_index, conf_edge_attr, conf_edge_weight) = split_graph(batch, edge_score, self.ratio)
 
