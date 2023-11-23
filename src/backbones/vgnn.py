@@ -1,55 +1,85 @@
 import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
-from torch_geometric.nn import GCNConv, global_mean_pool, LEConv
 
-class VGNN(nn.Module):
+from base import BASE
+from convs import GINConv
+
+class VGIN(BASE):
     def __init__(self, backbone_config):
-        super().__init__()
-        self.gc_layer = gc_layer = backbone_config['gc_layer']
-        self.gc_type = gc_type = backbone_config['gc_type']
-        self.in_dim = in_dim = backbone_config['in_dim']
-        self.hidden_dim = hidden_dim = backbone_config['hidden_dim']
-        self.out_dim = out_dim = backbone_config['out_dim']
-        self.p = dropout = backbone_config['dropout']
-        self.bn = bn = backbone_config['bn']
-        
-        self.node_encoder = nn.Linear(in_dim, hidden_dim)
-        self.edge_encoder = nn.Linear(in_dim, hidden_dim)
-        self.convs = nn.ModuleList([LEConv(hidden_dim, hidden_dim) for i in range(gc_layer)])
-        self.relus = nn.ModuleList([nn.ReLU() for i in range(gc_layer)])
+        super().__init__(backbone_config)
+        self.residual = backbone_config['residual']
+        self.JK = backbone_config['JK']
 
-        self.pool = global_mean_pool
+        if self.gc_layer < 2:
+            raise ValueError("Number of GNN layers must be greater than 1.")
         
+        self.virtualnode_embedding = torch.nn.Embedding(1, self.hidden_dim)
+        torch.nn.init.constant_(self.virtualnode_embedding.weight.data, 0)
+
+        self.convs = nn.ModuleList()
+        self.bns = nn.ModuleList()
+        self.mlp_virtualnode_list = nn.ModuleList()
+
+        for layer in range(self.gc_layer):
+            self.convs.append(GINConv(self.hidden_dim, self.hidden_dim))
+            self.bns.append(nn.BatchNorm1d(self.hidden_dim))
+
+        for layer in range(self.gc_layer-1):
+            self.mlp_virtualnode_list.append(torch.nn.Sequential(torch.nn.Linear(self.hidden_dim, 2*self.hidden_dim), torch.nn.BatchNorm1d(2*self.hidden_dim), torch.nn.ReLU(), \
+                                                    torch.nn.Linear(2*self.hidden_dim, self.hidden_dim), torch.nn.BatchNorm1d(self.hidden_dim), torch.nn.ReLU()))
         self.weights_init()
-
-    def weights_init(self):
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                torch.nn.init.xavier_uniform_(m.weight.data)
-                if m.bias is not None:
-                    m.bias.data.zero_()
-
-    def encode_node(self, batch):
-        x = batch['x']
-        x_encode = self.node_encoder(x)
-        return x_encode
-    
-    def encode_edge(self, batch):
-        edge_attr = batch['edge_attr']
-        edge_encode = self.edge_encoder(edge_attr)
-        return edge_encode
     
     def get_node_emb(self, x_encode, batch, edge_att=None):
-        for conv, relu in zip(self.convs, self.relus):
-            x_encode = conv(x_encode, batch['edge_index'], edge_weight=edge_att)
-            x_encode = relu(x_encode)
-            x_encode = F.dropout(x_encode, p=self.p, training=self.training)
-        node_emb = x_encode
-        return node_emb
+        x, edge_index, edge_attr, batch_idx = batch['x'], batch['edge_index'], batch['edge_attr'], batch['batch_idx']
+        virtualnode_embedding = self.virtualnode_embedding(torch.zeros(batch_idx[-1].item() + 1).to(edge_index.dtype).to(edge_index.device))
+        h_list = [x_encode]
+
+        for layer in range(self.gc_layer):
+            ### add message from virtual nodes to graph nodes
+            h_list[layer] = h_list[layer] + virtualnode_embedding[batch]
+
+            ### Message passing among graph nodes
+            h = self.convs[layer](h_list[layer], edge_index, edge_attr)
+
+            h = self.bns[layer](h)
+            if layer == self.gc_layer - 1:
+                #remove relu for the last layer
+                h = F.dropout(h, self.p, training=self.training)
+            else:
+                h = F.dropout(F.relu(h), self.p, training=self.training)
+
+            if self.residual:
+                h = h + h_list[layer]
+
+            h_list.append(h)
+
+            ### update the virtual nodes
+            if layer < self.gc_layer - 1:
+                ### add message from graph nodes to virtual nodes
+                virtualnode_embedding_temp = self.pool(h_list[layer], batch) + virtualnode_embedding
+                ### transform virtual nodes using MLP
+
+                if self.residual:
+                    virtualnode_embedding = virtualnode_embedding + F.dropout(
+                        self.mlp_virtualnode_list[layer](virtualnode_embedding_temp),
+                        self.p,
+                        training=self.training)
+                else:
+                    virtualnode_embedding = F.dropout(self.mlp_virtualnode_list[layer](virtualnode_embedding_temp),
+                                                      self.p,
+                                                      training=self.training)
+
+        ### Different implementations of Jk-concat
+        if self.JK == "last":
+            node_representation = h_list[-1]
+        elif self.JK == "sum":
+            node_representation = 0
+            for layer in range(self.gc_layer):
+                node_representation += h_list[layer]
+
+        return node_representation
+
     
-    def get_graph_emb(self, node_emb, batch):
-        graph_emb = self.pool(node_emb, batch['batch'])
-        return graph_emb
     
     
