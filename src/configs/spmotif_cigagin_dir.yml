@@ -13,7 +13,7 @@ backbone_config:
   bn: false
   use_edge_attr: true
   residual: true
-  JK: true
+  JK: last
   pooling: mean
 
 model_config:

@@ -15,7 +15,9 @@ class CIGAGIN(BBASE):
         self.bns = nn.ModuleList()
 
         for layer in range(self.gc_layer):
-            self.convs.append(GINConv(self.hidden_dim, self.hidden_dim))
+            mlp = nn.Sequential(torch.nn.Linear(self.hidden_dim, 2 * self.hidden_dim), torch.nn.BatchNorm1d(2 * self.hidden_dim),
+                                       torch.nn.ReLU(), torch.nn.Linear(2 * self.hidden_dim, self.hidden_dim))
+            self.convs.append(GINConv(mlp))
             self.bns.append(nn.BatchNorm1d(self.hidden_dim))
 
         self.weights_init()

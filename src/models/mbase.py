@@ -98,7 +98,7 @@ def set_masks(mask: Tensor, model: nn.Module):
     for module in model.modules():
         if isinstance(module, MessagePassing):
             #PyG 2.0.4
-            module._explain = True
+            module.explain = True
             module._edge_mask = mask
             #PyG 1.7.2
             module.__explain__ = True
